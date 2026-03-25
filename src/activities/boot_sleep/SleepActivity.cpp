@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Mobi.h>
 #include <Txt.h>
 #include <Xtc.h>
 
@@ -256,6 +257,20 @@ void SleepActivity::renderCoverSleepScreen() const {
     }
 
     coverBmpPath = lastTxt.getCoverBmpPath();
+  } else if (FsHelpers::hasMobiExtension(APP_STATE.openEpubPath)) {
+    // Handle MOBI file — looks for cover image in the same folder
+    Mobi lastMobi(APP_STATE.openEpubPath, "/.crosspoint");
+    if (!lastMobi.loadHeader()) {
+      LOG_ERR("SLP", "Failed to load last MOBI");
+      return (this->*renderNoCoverSleepScreen)();
+    }
+
+    if (!lastMobi.generateCoverBmp()) {
+      LOG_ERR("SLP", "No cover image found for MOBI file");
+      return (this->*renderNoCoverSleepScreen)();
+    }
+
+    coverBmpPath = lastMobi.getCoverBmpPath();
   } else if (FsHelpers::hasEpubExtension(APP_STATE.openEpubPath)) {
     // Handle EPUB file
     Epub lastEpub(APP_STATE.openEpubPath, "/.crosspoint");

@@ -78,4 +78,6 @@ bool hasTxtExtension(std::string_view fileName) { return checkFileExtension(file
 
 bool hasMarkdownExtension(std::string_view fileName) { return checkFileExtension(fileName, ".md"); }
 
+bool hasMobiExtension(std::string_view fileName) { return checkFileExtension(fileName, ".mobi"); }
+
 }  // namespace FsHelpers

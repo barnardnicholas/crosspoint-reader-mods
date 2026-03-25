@@ -5,6 +5,7 @@
 #include <HalStorage.h>
 #include <JsonSettingsIO.h>
 #include <Logging.h>
+#include <Mobi.h>
 #include <Serialization.h>
 #include <Xtc.h>
 
@@ -79,6 +80,12 @@ RecentBook RecentBooksStore::getDataFromBook(std::string path) const {
     Xtc xtc(path, "/.crosspoint");
     if (xtc.load()) {
       return RecentBook{path, xtc.getTitle(), xtc.getAuthor(), xtc.getThumbBmpPath()};
+    }
+  } else if (FsHelpers::hasMobiExtension(lastBookFileName)) {
+    // Use loadHeader() only — avoids building the virtual offset table on boot
+    Mobi mobi(path, "/.crosspoint");
+    if (mobi.loadHeader()) {
+      return RecentBook{path, mobi.getTitle(), mobi.getAuthor(), mobi.getCoverBmpPath()};
     }
   } else if (FsHelpers::hasTxtExtension(lastBookFileName) || FsHelpers::hasMarkdownExtension(lastBookFileName)) {
     return RecentBook{path, lastBookFileName, "", ""};

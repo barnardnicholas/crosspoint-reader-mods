@@ -6,6 +6,8 @@
 #include "CrossPointSettings.h"
 #include "Epub.h"
 #include "EpubReaderActivity.h"
+#include "Mobi.h"
+#include "MobiReaderActivity.h"
 #include "Txt.h"
 #include "TxtReaderActivity.h"
 #include "Xtc.h"
@@ -21,6 +23,8 @@ std::string ReaderActivity::extractFolderPath(const std::string& filePath) {
   return filePath.substr(0, lastSlash);
 }
 
+bool ReaderActivity::isMobiFile(const std::string& path) { return FsHelpers::hasMobiExtension(path); }
+
 bool ReaderActivity::isXtcFile(const std::string& path) { return FsHelpers::hasXtcExtension(path); }
 
 bool ReaderActivity::isTxtFile(const std::string& path) {
@@ -29,6 +33,21 @@ bool ReaderActivity::isTxtFile(const std::string& path) {
 }
 
 bool ReaderActivity::isBmpFile(const std::string& path) { return FsHelpers::hasBmpExtension(path); }
+
+std::unique_ptr<Mobi> ReaderActivity::loadMobi(const std::string& path) {
+  if (!Storage.exists(path.c_str())) {
+    LOG_ERR("READER", "File does not exist: %s", path.c_str());
+    return nullptr;
+  }
+
+  auto mobi = std::unique_ptr<Mobi>(new Mobi(path, "/.crosspoint"));
+  if (mobi->load()) {
+    return mobi;
+  }
+
+  LOG_ERR("READER", "Failed to load MOBI");
+  return nullptr;
+}
 
 std::unique_ptr<Epub> ReaderActivity::loadEpub(const std::string& path) {
   if (!Storage.exists(path.c_str())) {
@@ -81,6 +100,12 @@ void ReaderActivity::goToLibrary(const std::string& fromBookPath) {
   activityManager.goToFileBrowser(std::move(initialPath));
 }
 
+void ReaderActivity::onGoToMobiReader(std::unique_ptr<Mobi> mobi) {
+  currentBookPath = mobi->getPath();
+  activityManager.replaceActivity(
+      std::make_unique<MobiReaderActivity>(renderer, mappedInput, std::move(mobi)));
+}
+
 void ReaderActivity::onGoToEpubReader(std::unique_ptr<Epub> epub) {
   const auto epubPath = epub->getPath();
   currentBookPath = epubPath;
@@ -121,6 +146,13 @@ void ReaderActivity::onEnter() {
       return;
     }
     onGoToXtcReader(std::move(xtc));
+  } else if (isMobiFile(initialBookPath)) {
+    auto mobi = loadMobi(initialBookPath);
+    if (!mobi) {
+      onGoBack();
+      return;
+    }
+    onGoToMobiReader(std::move(mobi));
   } else if (isTxtFile(initialBookPath)) {
     auto txt = loadTxt(initialBookPath);
     if (!txt) {

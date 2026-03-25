@@ -55,4 +55,7 @@ inline bool hasTxtExtension(const String& fileName) {
 // Check for .md extension (case-insensitive)
 bool hasMarkdownExtension(std::string_view fileName);
 
+// Check for .mobi extension (case-insensitive)
+bool hasMobiExtension(std::string_view fileName);
+
 }  // namespace FsHelpers
