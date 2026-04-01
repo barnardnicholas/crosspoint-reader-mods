@@ -110,6 +110,9 @@ void MobiReaderActivity::initializeReader() {
 
 void MobiReaderActivity::buildPageIndex() {
   pageOffsets.clear();
+  // Reserve based on rough estimate to avoid repeated realloc+copy during build.
+  // ~1200 bytes of stripped text per page (22 lines × ~55 chars); +1 for the initial offset.
+  pageOffsets.reserve(mobi->getVirtualSize() / 1200 + 1);
   pageOffsets.push_back(0);
 
   size_t offset = 0;
@@ -119,8 +122,17 @@ void MobiReaderActivity::buildPageIndex() {
 
   GUI.drawPopup(renderer, tr(STR_INDEXING));
 
+  // Keep the .mobi file open for the duration of index building.
+  // Without this, readContent() reopens the file on every page (~900+ opens for a large book).
+  if (!mobi->openStream()) {
+    LOG_DBG("MRS", "Stream open failed; falling back to per-call file opens");
+  }
+
+  // Reuse a single vector across iterations to avoid repeated heap allocation.
+  std::vector<std::string> tempLines;
+  tempLines.reserve(static_cast<size_t>(linesPerPage));
+
   while (offset < virtualSize) {
-    std::vector<std::string> tempLines;
     size_t nextOffset = offset;
 
     if (!loadPageAtOffset(offset, tempLines, nextOffset)) break;
@@ -135,6 +147,8 @@ void MobiReaderActivity::buildPageIndex() {
       vTaskDelay(1);
     }
   }
+
+  mobi->closeStream();
 
   totalPages = pageOffsets.size();
   LOG_DBG("MRS", "Built page index: %d pages", totalPages);
@@ -179,25 +193,27 @@ bool MobiReaderActivity::loadPageAtOffset(size_t offset, std::vector<std::string
     size_t lineBytePos = 0;
 
     while (!line.empty() && static_cast<int>(outLines.size()) < linesPerPage) {
-      const int lineWidth = renderer.getTextWidth(cachedFontId, line.c_str());
+      // Single O(fitting-chars) scan: stops as soon as a glyph's right edge exceeds
+      // viewportWidth. For a long source paragraph this is critical — getTextWidth
+      // would scan the entire remaining string even if only ~55 chars fit.
+      const size_t fittingBytes = renderer.measureTextFitting(cachedFontId, line.c_str(), viewportWidth);
 
-      if (lineWidth <= viewportWidth) {
+      if (fittingBytes >= line.length()) {
+        // Entire remaining source line fits on one visual line.
         outLines.push_back(line);
         lineBytePos = displayLen;
         line.clear();
         break;
       }
 
-      // Find word-wrap break point
-      size_t breakPos = line.length();
-      while (breakPos > 0 &&
-             renderer.getTextWidth(cachedFontId, line.substr(0, breakPos).c_str()) > viewportWidth) {
+      // Backtrack from the fitting limit to the last word boundary.
+      size_t breakPos = fittingBytes;
+      if (breakPos > 0) {
         const size_t spacePos = line.rfind(' ', breakPos - 1);
         if (spacePos != std::string::npos && spacePos > 0) {
           breakPos = spacePos;
         } else {
-          breakPos--;
-          // Don't break in the middle of a UTF-8 multi-byte sequence
+          // No word boundary: break mid-word; align to a UTF-8 char boundary.
           while (breakPos > 0 && (line[breakPos] & 0xC0) == 0x80) breakPos--;
         }
       }

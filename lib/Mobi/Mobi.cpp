@@ -138,6 +138,20 @@ void Mobi::setupCacheDir() const {
   }
 }
 
+bool Mobi::openStream() {
+  if (streamOpen) return true;
+  if (!Storage.openFileForRead("MOBI", filepath, streamFile)) return false;
+  streamOpen = true;
+  return true;
+}
+
+void Mobi::closeStream() {
+  if (streamOpen) {
+    streamFile.close();
+    streamOpen = false;
+  }
+}
+
 bool Mobi::readContent(uint8_t* buffer, size_t offset, size_t length) const {
   if (!loaded) {
     LOG_ERR("MOBI", "readContent called before load()");
@@ -167,11 +181,15 @@ bool Mobi::readContent(uint8_t* buffer, size_t offset, size_t length) const {
     return false;
   }
 
-  FsFile file;
-  if (!Storage.openFileForRead("MOBI", filepath, file)) {
-    free(decompBuf);
-    free(rawBuf);
-    return false;
+  // Reuse the persistent stream file if open (avoids repeated FAT32 opens during index building).
+  FsFile localFile;
+  FsFile& file = streamOpen ? streamFile : localFile;
+  if (!streamOpen) {
+    if (!Storage.openFileForRead("MOBI", filepath, localFile)) {
+      free(decompBuf);
+      free(rawBuf);
+      return false;
+    }
   }
 
   // Binary search: find the first text record whose virtual range overlaps [offset, offset+length)
@@ -238,7 +256,9 @@ bool Mobi::readContent(uint8_t* buffer, size_t offset, size_t length) const {
     }
   }
 
-  file.close();
+  if (!streamOpen) {
+    localFile.close();
+  }
   free(decompBuf);
   free(rawBuf);
 

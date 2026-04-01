@@ -199,6 +199,57 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
   return w;
 }
 
+size_t GfxRenderer::measureTextFitting(const int fontId, const char* text, const int maxWidth,
+                                       const EpdFontFamily::Style style) const {
+  const auto fontIt = fontMap.find(fontId);
+  if (fontIt == fontMap.end()) return 0;
+
+  const EpdFontFamily& family = fontIt->second;
+  const char* p = text;
+  int32_t cursorXFP = 0;
+  int lastBaseX = 0;
+  int lastBaseAdvanceFP = 0;
+  uint32_t prevCp = 0;
+
+  while (*p) {
+    const char* charStart = p;
+    uint32_t cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&p));
+    if (cp == 0) break;
+
+    const bool isCombining = utf8IsCombiningMark(cp);
+    if (!isCombining) {
+      cp = family.applyLigatures(cp, p, style);
+    }
+
+    const EpdGlyph* glyph = family.getGlyph(cp, style);
+    if (!glyph) {
+      if (!isCombining) prevCp = 0;
+      continue;
+    }
+
+    if (!isCombining && prevCp != 0) {
+      cursorXFP += family.getKerning(prevCp, cp, style);
+    }
+
+    const int cursorXPixels = fp4::toPixel(cursorXFP);
+    const int glyphBaseX = isCombining ? (lastBaseX + fp4::toPixel(lastBaseAdvanceFP / 2)) : cursorXPixels;
+    const int rightEdge = glyphBaseX + glyph->left + glyph->width;
+
+    if (rightEdge > maxWidth) {
+      return static_cast<size_t>(charStart - text);
+    }
+
+    if (!isCombining) {
+      lastBaseX = cursorXPixels;
+      lastBaseAdvanceFP = glyph->advanceX;
+      cursorXFP += glyph->advanceX;
+      prevCp = cp;
+    }
+  }
+
+  return static_cast<size_t>(p - text);
+}
+
 void GfxRenderer::drawCenteredText(const int fontId, const int y, const char* text, const bool black,
                                    const EpdFontFamily::Style style) const {
   const int x = (getScreenWidth() - getTextWidth(fontId, text, style)) / 2;

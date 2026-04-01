@@ -113,6 +113,14 @@ class GfxRenderer {
 
   // Text
   int getTextWidth(int fontId, const char* text, EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
+  /**
+   * Scan text left-to-right and return the number of bytes whose rendered width fits within
+   * maxWidth pixels. Stops as soon as any glyph's right edge would exceed maxWidth, so it
+   * processes at most O(fitting characters) — not O(full string length). Returns strlen(text)
+   * when the entire string fits. The returned count lands on a UTF-8 codepoint boundary.
+   */
+  size_t measureTextFitting(int fontId, const char* text, int maxWidth,
+                            EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawCenteredText(int fontId, int y, const char* text, bool black = true,
                         EpdFontFamily::Style style = EpdFontFamily::REGULAR) const;
   void drawText(int fontId, int x, int y, const char* text, bool black = true,

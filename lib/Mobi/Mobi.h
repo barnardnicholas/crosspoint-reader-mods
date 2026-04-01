@@ -50,6 +50,15 @@ class Mobi {
    */
   [[nodiscard]] bool readContent(uint8_t* buffer, size_t offset, size_t length) const;
 
+  /**
+   * Keep the .mobi file open across multiple readContent() calls.
+   * Avoids repeated FAT32 file opens during sequential access (e.g. page-index building).
+   * openStream() failure is non-fatal: readContent() falls back to per-call open/close.
+   * Must be paired with closeStream() when sequential access is complete.
+   */
+  bool openStream();
+  void closeStream();
+
   // Cover image support — looks for cover.bmp/jpg/jpeg/png in same folder as .mobi file
   [[nodiscard]] std::string getCoverBmpPath() const;
   [[nodiscard]] bool generateCoverBmp() const;
@@ -65,6 +74,11 @@ class Mobi {
   bool headerLoaded = false;
   bool loaded = false;
   uint32_t fileSize = 0;
+
+  // Persistent file handle for sequential reads (openStream / closeStream).
+  // mutable so readContent() (which is const) can use it without reopening.
+  mutable FsFile streamFile;
+  mutable bool streamOpen = false;
 
   // Populated by loadHeader()
   std::string title;   // From MOBI full-name field or database name
