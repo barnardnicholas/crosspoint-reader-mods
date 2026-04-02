@@ -12,5 +12,6 @@ void FullScreenMessageActivity::onEnter() {
 
   renderer.clearScreen();
   renderer.drawCenteredText(UI_10_FONT_ID, top, text.c_str(), true, style);
+  applyDarkModeIfEnabled();
   renderer.displayBuffer(refreshMode);
 }

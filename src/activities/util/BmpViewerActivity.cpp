@@ -61,6 +61,7 @@ void BmpViewerActivity::onEnter() {
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
       // Single pass for non-grayscale images
 
+      applyDarkModeIfEnabled();
       renderer.displayBuffer(HalDisplay::FULL_REFRESH);
 
     } else {
@@ -69,6 +70,7 @@ void BmpViewerActivity::onEnter() {
       renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "Invalid BMP File");
       const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
       GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+      applyDarkModeIfEnabled();
       renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     }
 
@@ -79,6 +81,7 @@ void BmpViewerActivity::onEnter() {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, "Could not open file");
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    applyDarkModeIfEnabled();
     renderer.displayBuffer(HalDisplay::FULL_REFRESH);
   }
 }

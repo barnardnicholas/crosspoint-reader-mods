@@ -510,6 +510,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
       break;
   }
 
+  applyDarkModeIfEnabled();
   renderer.displayBuffer();
 }
 

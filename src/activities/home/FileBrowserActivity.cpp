@@ -272,6 +272,7 @@ void FileBrowserActivity::render(RenderLock&&) {
                             files.empty() ? "" : tr(STR_DIR_UP), files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+  applyDarkModeIfEnabled();
   renderer.displayBuffer();
 }
 

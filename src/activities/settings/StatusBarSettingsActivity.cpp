@@ -167,5 +167,6 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
                         verticalPreviewTextPadding,
                     tr(STR_PREVIEW));
 
+  applyDarkModeIfEnabled();
   renderer.displayBuffer();
 }
