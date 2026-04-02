@@ -49,6 +49,7 @@ void TxtReaderActivity::onExit() {
 
   // Reset orientation back to portrait for the rest of the UI
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  ReaderUtils::fullRefreshOnExit(renderer);
 
   pageOffsets.clear();
   currentPageLines.clear();

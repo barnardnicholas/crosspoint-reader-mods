@@ -48,6 +48,7 @@ class HalDisplay {
   void cleanupGrayscaleBuffers(const uint8_t* bwBuffer);
 
   void displayGrayBuffer(bool turnOffScreen = false);
+  void reinforceBW(bool turnOffScreen = false);
 
  private:
   EInkDisplay einkDisplay;

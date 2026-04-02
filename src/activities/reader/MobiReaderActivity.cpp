@@ -42,6 +42,7 @@ void MobiReaderActivity::onExit() {
   Activity::onExit();
 
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  ReaderUtils::fullRefreshOnExit(renderer);
 
   pageOffsets.clear();
   currentPageLines.clear();

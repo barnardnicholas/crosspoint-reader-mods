@@ -55,6 +55,11 @@ inline void applyDarkModeIfEnabled(const GfxRenderer& renderer) {
   }
 }
 
+inline void fullRefreshOnExit(const GfxRenderer& renderer) {
+  renderer.clearScreen();
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+}
+
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
   applyDarkModeIfEnabled(renderer);
   if (pagesUntilFullRefresh <= 1) {
@@ -63,6 +68,9 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
   } else {
     renderer.displayBuffer();
     pagesUntilFullRefresh--;
+    if (SETTINGS.readerDarkMode) {
+      renderer.reinforceBW();
+    }
   }
 }
 
