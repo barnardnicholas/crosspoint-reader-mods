@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "MappedInputManager.h"
+#include "ReaderUtils.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -58,6 +59,7 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, 90, tr(STR_NO_FOOTNOTES));
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    ReaderUtils::applyDarkModeIfEnabled(renderer);
     renderer.displayBuffer();
     return;
   }
@@ -90,5 +92,6 @@ void EpubReaderFootnotesActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
+  ReaderUtils::applyDarkModeIfEnabled(renderer);
   renderer.displayBuffer();
 }
