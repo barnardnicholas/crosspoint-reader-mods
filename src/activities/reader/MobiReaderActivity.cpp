@@ -317,7 +317,7 @@ void MobiReaderActivity::renderPage() {
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing && !SETTINGS.readerDarkMode) {
+  if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
     ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
   }
 }

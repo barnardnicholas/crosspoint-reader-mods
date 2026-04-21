@@ -22,7 +22,7 @@ class Activity {
   MappedInputManager& mappedInput;
 
   void applyDarkModeIfEnabled() const {
-    if (SETTINGS.readerDarkMode) renderer.invertScreen();
+    if (SETTINGS.darkMode) renderer.invertScreen();
   }
 
   ActivityResultHandler resultHandler;

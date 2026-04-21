@@ -50,7 +50,7 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
 }
 
 inline void applyDarkModeIfEnabled(const GfxRenderer& renderer) {
-  if (SETTINGS.readerDarkMode) {
+  if (SETTINGS.darkMode) {
     renderer.invertScreen();
   }
 }
@@ -68,7 +68,7 @@ inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntil
   } else {
     renderer.displayBuffer();
     pagesUntilFullRefresh--;
-    if (SETTINGS.readerDarkMode) {
+    if (SETTINGS.darkMode) {
       renderer.reinforceBW();
     }
   }

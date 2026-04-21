@@ -248,7 +248,7 @@ void XtcReaderActivity::renderPage() {
     }
 
     // Grayscale passes: skip when dark mode is active (inverted LUT produces artifacts)
-    if (!SETTINGS.readerDarkMode) {
+    if (!SETTINGS.darkMode) {
       // Pass 2: LSB buffer - mark DARK gray only (XTH value 1)
       // In LUT: 0 bit = apply gray effect, 1 bit = untouched
       renderer.clearScreen(0x00);
