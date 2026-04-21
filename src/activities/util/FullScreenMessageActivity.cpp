@@ -3,6 +3,7 @@
 #include <GfxRenderer.h>
 
 #include "fontIds.h"
+#include "activities/reader/ReaderUtils.h"
 
 void FullScreenMessageActivity::onEnter() {
   Activity::onEnter();
@@ -12,6 +13,6 @@ void FullScreenMessageActivity::onEnter() {
 
   renderer.clearScreen();
   renderer.drawCenteredText(UI_10_FONT_ID, top, text.c_str(), true, style);
-  applyDarkModeIfEnabled();
+  ReaderUtils::applyDarkModeIfEnabled(renderer);
   renderer.displayBuffer(refreshMode);
 }

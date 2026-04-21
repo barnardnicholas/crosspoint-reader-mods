@@ -8,7 +8,6 @@
 
 #include "ActivityManager.h"  // for using the ActivityManager singleton
 #include "ActivityResult.h"
-#include "CrossPointSettings.h"
 #include "GfxRenderer.h"
 #include "MappedInputManager.h"
 #include "RenderLock.h"
@@ -20,10 +19,6 @@ class Activity {
   std::string name;
   GfxRenderer& renderer;
   MappedInputManager& mappedInput;
-
-  void applyDarkModeIfEnabled() const {
-    if (SETTINGS.darkMode) renderer.invertScreen();
-  }
 
   ActivityResultHandler resultHandler;
   ActivityResult result;

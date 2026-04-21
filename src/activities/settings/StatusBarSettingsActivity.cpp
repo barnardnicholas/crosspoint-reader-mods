@@ -9,6 +9,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "activities/reader/ReaderUtils.h"
 
 namespace {
 constexpr int MENU_ITEMS = 6;
@@ -167,6 +168,6 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
                         verticalPreviewTextPadding,
                     tr(STR_PREVIEW));
 
-  applyDarkModeIfEnabled();
+  ReaderUtils::applyDarkModeIfEnabled(renderer);
   renderer.displayBuffer();
 }

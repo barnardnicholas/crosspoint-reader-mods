@@ -10,6 +10,7 @@
 #include "WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "activities/reader/ReaderUtils.h"
 
 namespace {
 constexpr const char* HOSTNAME = "crosspoint";
@@ -225,6 +226,6 @@ void CalibreConnectActivity::render(RenderLock&&) {
     const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   }
-  applyDarkModeIfEnabled();
+  ReaderUtils::applyDarkModeIfEnabled(renderer);
   renderer.displayBuffer();
 }

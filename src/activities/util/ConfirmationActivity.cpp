@@ -4,6 +4,7 @@
 
 #include "../../components/UITheme.h"
 #include "HalDisplay.h"
+#include "activities/reader/ReaderUtils.h"
 
 ConfirmationActivity::ConfirmationActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                            const std::string& heading, const std::string& body)
@@ -52,7 +53,7 @@ void ConfirmationActivity::render(RenderLock&& lock) {
   const auto labels = mappedInput.mapLabels("", "", I18N.get(StrId::STR_CANCEL), I18N.get(StrId::STR_CONFIRM));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
-  applyDarkModeIfEnabled();
+  ReaderUtils::applyDarkModeIfEnabled(renderer);
   renderer.displayBuffer(HalDisplay::RefreshMode::FAST_REFRESH);
 }
 
