@@ -1,8 +1,22 @@
 #include "Activity.h"
 
 #include "ActivityManager.h"
+#include "activities/reader/ReaderUtils.h"
 
-void Activity::onEnter() { LOG_DBG("ACT", "Entering activity: %s", name.c_str()); }
+void Activity::onEnter() {
+  LOG_DBG("ACT", "Entering activity: %s", name.c_str());
+  if (!isReaderActivity()) halfRefreshPending = true;
+}
+
+void Activity::menuDisplay() {
+  ReaderUtils::applyDarkModeIfEnabled(renderer);
+  if (halfRefreshPending) {
+    halfRefreshPending = false;
+    renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+  } else {
+    renderer.displayBuffer();
+  }
+}
 
 void Activity::onExit() { LOG_DBG("ACT", "Exiting activity: %s", name.c_str()); }
 

@@ -20,6 +20,10 @@ class Activity {
   GfxRenderer& renderer;
   MappedInputManager& mappedInput;
 
+  bool halfRefreshPending = false;
+  void requestHalfRefresh() { halfRefreshPending = true; }
+  void menuDisplay();
+
   ActivityResultHandler resultHandler;
   ActivityResult result;
 

@@ -12,7 +12,6 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "activities/reader/ReaderUtils.h"
 
 void WifiSelectionActivity::onEnter() {
   Activity::onEnter();
@@ -510,9 +509,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
       renderForgetPrompt();
       break;
   }
-
-  ReaderUtils::applyDarkModeIfEnabled(renderer);
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void WifiSelectionActivity::renderNetworkList() const {

@@ -10,7 +10,6 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "activities/reader/ReaderUtils.h"
 
 void KOReaderAuthActivity::onWifiSelectionComplete(const bool success) {
   if (!success) {
@@ -96,8 +95,7 @@ void KOReaderAuthActivity::render(RenderLock&&) {
 
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  ReaderUtils::applyDarkModeIfEnabled(renderer);
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void KOReaderAuthActivity::loop() {

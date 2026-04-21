@@ -15,7 +15,6 @@
 #include "network/HttpDownloader.h"
 #include "util/StringUtils.h"
 #include "util/UrlUtils.h"
-#include "activities/reader/ReaderUtils.h"
 
 namespace {
 constexpr int PAGE_ITEMS = 23;
@@ -149,8 +148,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    ReaderUtils::applyDarkModeIfEnabled(renderer);
-    renderer.displayBuffer();
+    menuDisplay();
     return;
   }
 
@@ -158,8 +156,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, statusMessage.c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    ReaderUtils::applyDarkModeIfEnabled(renderer);
-    renderer.displayBuffer();
+    menuDisplay();
     return;
   }
 
@@ -168,8 +165,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 10, errorMessage.c_str());
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_RETRY), "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    ReaderUtils::applyDarkModeIfEnabled(renderer);
-    renderer.displayBuffer();
+    menuDisplay();
     return;
   }
 
@@ -186,8 +182,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
       const int barY = pageHeight / 2 + 20;
       GUI.drawProgressBar(renderer, Rect{barX, barY, barWidth, barHeight}, downloadProgress, downloadTotal);
     }
-    ReaderUtils::applyDarkModeIfEnabled(renderer);
-    renderer.displayBuffer();
+    menuDisplay();
     return;
   }
 
@@ -202,8 +197,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
 
   if (entries.empty()) {
     renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2, tr(STR_NO_ENTRIES));
-    ReaderUtils::applyDarkModeIfEnabled(renderer);
-    renderer.displayBuffer();
+    menuDisplay();
     return;
   }
 
@@ -229,9 +223,7 @@ void OpdsBookBrowserActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, 20, 60 + (i % PAGE_ITEMS) * 30, item.c_str(),
                       i != static_cast<size_t>(selectorIndex));
   }
-
-  ReaderUtils::applyDarkModeIfEnabled(renderer);
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void OpdsBookBrowserActivity::fetchFeed(const std::string& path) {

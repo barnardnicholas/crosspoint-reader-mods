@@ -5,7 +5,6 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "activities/reader/ReaderUtils.h"
 
 // Keyboard layouts - lowercase
 const char* const KeyboardEntryActivity::keyboard[NUM_ROWS] = {
@@ -318,9 +317,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   // Draw side button hints for Up/Down navigation
   GUI.drawSideButtonHints(renderer, ">", "<");
-
-  ReaderUtils::applyDarkModeIfEnabled(renderer);
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void KeyboardEntryActivity::onComplete(std::string text) {

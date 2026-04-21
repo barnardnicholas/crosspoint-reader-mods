@@ -7,7 +7,6 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
-#include "activities/reader/ReaderUtils.h"
 
 namespace {
 // UI steps correspond to logical roles in order: Back, Confirm, Left, Right.
@@ -147,8 +146,7 @@ void ButtonRemapActivity::render(RenderLock&&) {
                       labelForHardware(CrossPointSettings::FRONT_HW_CONFIRM),
                       labelForHardware(CrossPointSettings::FRONT_HW_LEFT),
                       labelForHardware(CrossPointSettings::FRONT_HW_RIGHT));
-  ReaderUtils::applyDarkModeIfEnabled(renderer);
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void ButtonRemapActivity::applyTempMapping() {

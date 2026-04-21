@@ -16,7 +16,6 @@
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/QrUtils.h"
-#include "activities/reader/ReaderUtils.h"
 
 namespace {
 // AP Mode configuration
@@ -364,8 +363,7 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
       const auto top = (pageHeight - height) / 2;
       renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_STARTING_HOTSPOT));
     }
-    ReaderUtils::applyDarkModeIfEnabled(renderer);
-    renderer.displayBuffer();
+    menuDisplay();
   }
 }
 

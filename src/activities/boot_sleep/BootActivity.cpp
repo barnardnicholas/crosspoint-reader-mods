@@ -5,7 +5,6 @@
 
 #include "fontIds.h"
 #include "images/Logo120.h"
-#include "activities/reader/ReaderUtils.h"
 
 void BootActivity::onEnter() {
   Activity::onEnter();
@@ -18,6 +17,5 @@ void BootActivity::onEnter() {
   renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSPOINT_VERSION);
-  ReaderUtils::applyDarkModeIfEnabled(renderer);
-  renderer.displayBuffer();
+  menuDisplay();
 }
