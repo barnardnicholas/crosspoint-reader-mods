@@ -134,8 +134,7 @@ void OtaUpdateActivity::render(RenderLock&&) {
     renderer.drawCenteredText(UI_10_FONT_ID, top, tr(STR_UPDATE_COMPLETE), true, EpdFontFamily::BOLD);
     renderer.drawCenteredText(UI_10_FONT_ID, top + height + metrics.verticalSpacing, tr(STR_POWER_ON_HINT));
   }
-
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void OtaUpdateActivity::loop() {

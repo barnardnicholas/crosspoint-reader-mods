@@ -42,6 +42,7 @@ void MobiReaderActivity::onExit() {
   Activity::onExit();
 
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
+  ReaderUtils::fullRefreshOnExit(renderer);
 
   pageOffsets.clear();
   currentPageLines.clear();
@@ -253,6 +254,7 @@ void MobiReaderActivity::render(RenderLock&&) {
   if (pageOffsets.empty()) {
     renderer.clearScreen();
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_FILE), true, EpdFontFamily::BOLD);
+    ReaderUtils::applyDarkModeIfEnabled(renderer);
     renderer.displayBuffer();
     return;
   }
@@ -315,7 +317,7 @@ void MobiReaderActivity::renderPage() {
 
   ReaderUtils::displayWithRefreshCycle(renderer, pagesUntilFullRefresh);
 
-  if (SETTINGS.textAntiAliasing) {
+  if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
     ReaderUtils::renderAntiAliased(renderer, [&renderLines]() { renderLines(); });
   }
 }

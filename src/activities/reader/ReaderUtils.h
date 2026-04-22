@@ -49,13 +49,28 @@ inline PageTurnResult detectPageTurn(const MappedInputManager& input) {
   return {prev, next};
 }
 
+inline void applyDarkModeIfEnabled(const GfxRenderer& renderer) {
+  if (SETTINGS.darkMode) {
+    renderer.invertScreen();
+  }
+}
+
+inline void fullRefreshOnExit(const GfxRenderer& renderer) {
+  renderer.clearScreen();
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+}
+
 inline void displayWithRefreshCycle(const GfxRenderer& renderer, int& pagesUntilFullRefresh) {
+  applyDarkModeIfEnabled(renderer);
   if (pagesUntilFullRefresh <= 1) {
     renderer.displayBuffer(HalDisplay::HALF_REFRESH);
     pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
   } else {
     renderer.displayBuffer();
     pagesUntilFullRefresh--;
+    if (SETTINGS.darkMode) {
+      renderer.reinforceBW();
+    }
   }
 }
 

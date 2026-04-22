@@ -317,8 +317,7 @@ void KeyboardEntryActivity::render(RenderLock&&) {
 
   // Draw side button hints for Up/Down navigation
   GUI.drawSideButtonHints(renderer, ">", "<");
-
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void KeyboardEntryActivity::onComplete(std::string text) {

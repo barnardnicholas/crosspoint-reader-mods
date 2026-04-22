@@ -166,6 +166,5 @@ void StatusBarSettingsActivity::render(RenderLock&&) {
                     renderer.getScreenHeight() - UITheme::getInstance().getStatusBarHeight() - verticalPreviewPadding -
                         verticalPreviewTextPadding,
                     tr(STR_PREVIEW));
-
-  renderer.displayBuffer();
+  menuDisplay();
 }

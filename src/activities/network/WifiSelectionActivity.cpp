@@ -509,8 +509,7 @@ void WifiSelectionActivity::render(RenderLock&&) {
       renderForgetPrompt();
       break;
   }
-
-  renderer.displayBuffer();
+  menuDisplay();
 }
 
 void WifiSelectionActivity::renderNetworkList() const {
