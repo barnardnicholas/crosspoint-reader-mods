@@ -184,6 +184,21 @@ When editing related source assets, regenerate via normal build steps/scripts.
 - `open-x4-sdk/`: hardware SDK submodule (display, input, storage, battery)
 - `docs/`: user and technical documentation
 
+## Dark mode and display refresh
+
+Dark mode (`SETTINGS.darkMode`) inverts the framebuffer on all screens. Because e-ink grayscale rendering relies on hardware LUTs that assume a white background, anti-aliasing and grayscale passes are disabled when dark mode is active.
+
+### Display refresh helpers
+
+Non-reader activities call `Activity::menuDisplay()` at the end of each render function. This method:
+- Applies dark mode inversion via `ReaderUtils::applyDarkModeIfEnabled`
+- Uses `HALF_REFRESH` for the first render after an activity transition (set by `Activity::onEnter()`)
+- Falls back to `FAST_REFRESH` for subsequent renders in the same activity
+
+`Activity::requestHalfRefresh()` can be called at any time to force the next `menuDisplay()` to use `HALF_REFRESH` — used by `SettingsActivity` on tab switch.
+
+Reader activities use `ReaderUtils::applyDarkModeIfEnabled` and `ReaderUtils::displayWithRefreshCycle` directly, and call `ReaderUtils::fullRefreshOnExit` in `onExit()` to clear the inverted ghost image before returning to menu UI.
+
 ## Embedded constraints that shape design
 
 - constrained RAM drives SD-first caching and careful allocations
