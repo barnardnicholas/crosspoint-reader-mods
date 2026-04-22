@@ -433,6 +433,48 @@ renderer.insertFont(FONT_UI_MEDIUM, ui12FontFamily);
 renderer.drawText(FONT_UI_MEDIUM, x, y, "Hello", true);
 ```
 
+### Dark Mode and Display Refresh
+
+**Setting**: `SETTINGS.darkMode` (`uint8_t`, 0/1) — global invert, applies to all screens.
+**i18n key**: `STR_DARK_MODE`
+
+#### Display helpers
+
+| Function | Where to use |
+|---|---|
+| `menuDisplay()` (Activity method) | End of every **menu/UI** render function, replaces `applyDarkModeIfEnabled + displayBuffer` |
+| `ReaderUtils::applyDarkModeIfEnabled(renderer)` | Reader render paths (called inside `displayWithRefreshCycle` and at individual reader display calls) |
+| `ReaderUtils::fullRefreshOnExit(renderer)` | Reader `onExit()` — clears inverted ghost before returning to UI |
+| `ReaderUtils::displayWithRefreshCycle(renderer, counter)` | MOBI/TXT reader page turns — handles refresh cadence + dark mode + `reinforceBW` |
+
+#### `Activity::menuDisplay()` — how it works
+
+- Calls `ReaderUtils::applyDarkModeIfEnabled(renderer)` then `renderer.displayBuffer()`
+- `Activity::onEnter()` sets `halfRefreshPending = true` for any non-reader activity
+- `menuDisplay()` consumes the flag: uses `HALF_REFRESH` on first render after activity entry, `FAST_REFRESH` thereafter
+- Call `requestHalfRefresh()` any time content changes significantly within one activity (e.g., settings tab switch) to force the next `menuDisplay()` to use `HALF_REFRESH`
+
+#### Grayscale / anti-aliasing incompatibility
+
+Grayscale rendering uses hardware LUTs that produce artifacts when the framebuffer is inverted. Always guard:
+
+```cpp
+if (SETTINGS.textAntiAliasing && !SETTINGS.darkMode) {
+  ReaderUtils::renderAntiAliased(renderer, renderFn);
+}
+
+// XTC grayscale passes:
+if (!SETTINGS.darkMode) {
+  // LSB + MSB buffer passes + displayGrayBuffer()
+}
+```
+
+#### What NOT to change for dark mode
+
+- `BmpViewerActivity` — renders in `onEnter()` with explicit `FULL_REFRESH`; ghost clearing is implicit
+- `FullScreenMessageActivity` — caller-supplied refresh mode; leave the mode parameter alone
+- Reader activities — `isReaderActivity()` returns true; `onEnter()` does NOT set `halfRefreshPending`
+
 ---
 
 ## Testing and Debugging
