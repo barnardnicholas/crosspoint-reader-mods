@@ -1,4 +1,8 @@
-# CrossPoint Reader
+# CrossPoint Reader (Personal Fork)
+
+> **This is a personal fork** of [crosspoint-reader/crosspoint-reader](https://github.com/crosspoint-reader/crosspoint-reader).
+> It adds experimental features not yet in upstream. For the official project, use the upstream repo.
+> See [`docs/fork-decisions.md`](./docs/fork-decisions.md) for what's different and why.
 
 Firmware for the **Xteink X4** e-paper display reader (unaffiliated with Xteink).
 Built using **PlatformIO** and targeting the **ESP32-C3** microcontroller.
@@ -27,6 +31,8 @@ This project is **not affiliated with Xteink**; it's built as a community projec
 
 - [x] EPUB parsing and rendering (EPUB 2 and EPUB 3)
 - [x] Image support within EPUB
+- [x] MOBI reading (PalmDOC/uncompressed; KF8/Huffman not supported) *(fork-only, WIP)*
+- [x] Dark mode — global framebuffer invert *(fork-only)*
 - [x] Saved reading position
 - [x] File explorer with file picker
   - [x] Basic EPUB picker from root directory

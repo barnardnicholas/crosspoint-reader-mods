@@ -3,6 +3,8 @@
 Project: Open-source e-reader firmware for Xteink X4 (ESP32-C3)
 Mission: Provide a lightweight, high-performance reading experience focused on EPUB rendering on constrained hardware.
 
+> **This is a personal fork** of `crosspoint-reader/crosspoint-reader`. Fork-specific features and decisions are documented in [`docs/fork-decisions.md`](docs/fork-decisions.md). When in doubt about whether something is fork-only vs upstream, check that file first.
+
 ## AI Agent Identity and Cognitive Rules
 * Role: Senior Embedded Systems Engineer (ESP-IDF/Arduino-ESP32 specialized).
 * Primary Constraint: 380KB RAM is the hard ceiling. Stability is non-negotiable.
@@ -116,7 +118,9 @@ These flags in `platformio.ini` fundamentally affect firmware behavior:
 * lib/: Internal libraries (Epub engine, GfxRenderer, UITheme, I18n)
   * lib/hal/: Hardware Abstraction Layer (HalDisplay, HalGPIO, HalStorage)
   * lib/I18n/: Internationalization (translations in `translations/*.yaml`, generated string tables)
+  * lib/Mobi/: MOBI/PalmDOC reader library *(fork-only, WIP)*
 * src/activities/: UI logic using the Activity Lifecycle (onEnter, loop, onExit)
+  * src/activities/reader/MobiReaderActivity: MOBI reader *(fork-only, WIP)*
 * open-x4-sdk/: Low-level SDK (EInkDisplay, InputManager, BatteryMonitor, SDCardManager)
 * .crosspoint/: SD-based binary cache for EPUB metadata and pre-rendered layout sections
 

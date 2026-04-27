@@ -212,3 +212,11 @@ Before implementing larger ideas, check:
 
 - [SCOPE.md](../../SCOPE.md)
 - [GOVERNANCE.md](../../GOVERNANCE.md)
+
+## Fork-specific features
+
+This repo is a personal fork. Features added here beyond upstream are documented in:
+
+- [docs/fork-decisions.md](../fork-decisions.md) — what changed, why, and what AI agents need to know
+
+Current fork additions: **dark mode** (complete) and **MOBI format support** (WIP).
