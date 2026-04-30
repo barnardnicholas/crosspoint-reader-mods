@@ -50,8 +50,12 @@ struct FootnoteResult {
   std::string href;
 };
 
+struct MobiChapterResult {
+  uint32_t virtualOffset = 0;
+};
+
 using ResultVariant = std::variant<std::monostate, WifiResult, KeyboardResult, MenuResult, ChapterResult, PercentResult,
-                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult>;
+                                   PageResult, SyncResult, NetworkModeResult, FootnoteResult, MobiChapterResult>;
 
 struct ActivityResult {
   bool isCancelled = false;

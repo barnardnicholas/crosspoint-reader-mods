@@ -7,9 +7,11 @@
 #include <Serialization.h>
 #include <Utf8.h>
 
+#include "../ActivityResult.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "MobiReaderChapterSelectionActivity.h"
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
@@ -61,6 +63,36 @@ void MobiReaderActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back) &&
       mappedInput.getHeldTime() < ReaderUtils::GO_HOME_MS) {
     onGoHome();
+    return;
+  }
+
+  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    if (mobi && mobi->getChapterCount() > 0 && !pageOffsets.empty()) {
+      const size_t currentOffset = pageOffsets[static_cast<size_t>(currentPage)];
+      int currentChapter = 0;
+      for (size_t i = 0; i < mobi->getChapterCount(); i++) {
+        if (mobi->getChapter(i).virtualOffset <= currentOffset) currentChapter = static_cast<int>(i);
+      }
+      startActivityForResult(
+          std::make_unique<MobiReaderChapterSelectionActivity>(renderer, mappedInput, mobi.get(),
+                                                               currentChapter),
+          [this](const ActivityResult& result) {
+            if (!result.isCancelled) {
+              const auto& r = std::get<MobiChapterResult>(result.data);
+              // Binary search pageOffsets for the page containing virtualOffset
+              int page = 0;
+              for (int i = 0; i < static_cast<int>(pageOffsets.size()) - 1; i++) {
+                if (pageOffsets[static_cast<size_t>(i + 1)] <= r.virtualOffset) {
+                  page = i + 1;
+                } else {
+                  break;
+                }
+              }
+              currentPage = page;
+              requestUpdate();
+            }
+          });
+    }
     return;
   }
 

@@ -5,6 +5,7 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#include <Mobi.h>
 
 #include <algorithm>
 
@@ -263,7 +264,17 @@ void FileBrowserActivity::render(RenderLock&&) {
     GUI.drawList(
         renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), selectorIndex,
         [this](int index) { return getFileName(files[index]); }, nullptr,
-        [this](int index) { return UITheme::getFileIcon(files[index]); });
+        [this](int index) { return UITheme::getFileIcon(files[index]); },
+        [this](int index) -> std::string {
+          const std::string& entry = files[index];
+          if (FsHelpers::checkFileExtension(entry, ".azw") ||
+              FsHelpers::checkFileExtension(entry, ".azw3") ||
+              FsHelpers::checkFileExtension(entry, ".prc")) {
+            const std::string fullPath = basepath + (basepath.back() == '/' ? "" : "/") + entry;
+            if (Mobi::isDrmLocked(fullPath.c_str())) return "[DRM]";
+          }
+          return "";
+        });
   }
 
   // Help text

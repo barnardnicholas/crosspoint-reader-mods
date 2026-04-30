@@ -8,8 +8,8 @@
 /**
  * MOBI e-book format reader.
  *
- * Supports PalmDOC-compressed (type 2) and uncompressed (type 1) MOBI files.
- * Huffman-compressed (type 17480 / KF8) files are not supported.
+ * Supports PalmDOC-compressed (type 2), uncompressed (type 1), and
+ * Huffman/CDIC-compressed (type 17480 / KF8) MOBI files.
  *
  * Presents a "virtual flat file" interface: readContent() accepts byte offsets
  * into the decompressed, HTML-stripped text stream. This lets MobiReaderActivity
@@ -20,7 +20,15 @@
  */
 class Mobi {
  public:
+  enum class MobiError : uint8_t { None = 0, DrmProtected = 1, CdicCapExceeded = 2, MalformedHeader = 3 };
+
+  struct MobiChapter {
+    std::string title;
+    uint32_t virtualOffset;
+  };
+
   explicit Mobi(std::string path, std::string cacheBasePath);
+  ~Mobi();
 
   /**
    * Full load: parse headers + build/load virtual offset table.
@@ -40,6 +48,15 @@ class Mobi {
   [[nodiscard]] std::string getTitle() const;
   [[nodiscard]] const std::string& getAuthor() const { return author; }
   [[nodiscard]] size_t getVirtualSize() const { return virtualTextSize; }
+
+  [[nodiscard]] MobiError getLastError() const { return lastError; }
+
+  [[nodiscard]] size_t getChapterCount() const { return chapters.size(); }
+  [[nodiscard]] const MobiChapter& getChapter(size_t index) const { return chapters[index]; }
+
+  // Fast header-only DRM check. Opens the file, reads ~186 bytes, checks encryptionType.
+  // Does NOT construct a Mobi object. Returns true if DRM-locked, false otherwise or on error.
+  [[nodiscard]] static bool isDrmLocked(const char* path);
 
   void setupCacheDir() const;
 
@@ -67,6 +84,26 @@ class Mobi {
   [[nodiscard]] bool generateThumbBmp(int /*height*/) const { return false; }
 
  private:
+  enum class MobiVariant : uint8_t { MOBI7 = 0, KF8 = 1 };
+
+  static constexpr uint8_t MAX_CDIC_RECORDS = 10;
+  static constexpr size_t CDIC_RECORD_SIZE = 4096;
+
+  struct HuffTable {
+    uint32_t dict1[256];  // codelen(5b)|term(1b)|maxcode(24b), big-endian from file
+    uint32_t dict2[64];   // mincode/maxcode pairs, big-endian from file
+  };
+
+  struct CdicTable {
+    uint8_t* records[MAX_CDIC_RECORDS] = {};
+    uint8_t recordCount = 0;
+    uint16_t phrasesPerRecord = 0;
+  };
+
+  HuffTable huffTable{};
+  CdicTable cdicTable{};
+  bool huffCdicLoaded = false;
+
   std::string filepath;
   std::string cacheBasePath;
   std::string cachePath;
@@ -90,6 +127,13 @@ class Mobi {
   uint32_t rawTextLength = 0;      // Uncompressed text length from PalmDOC header
   uint16_t extraDataFlags = 0;     // Trailing-byte flags from MOBI header offset 242
 
+  // Format detection — populated by parseMobiHeaders() and detectFormat()
+  MobiVariant mobiVariant = MobiVariant::MOBI7;
+  uint32_t kf8SectionRecord = 0xFFFFFFFF;  // Record index of KF8 section (0xFFFFFFFF = no KF8)
+  uint32_t mobiTypeField = 0;              // Cached MOBI type field from rec0 offset 24
+  uint32_t kf8FirstTextRecord = 1;         // PalmDB index of first KF8 text record (1 for MOBI7)
+  MobiError lastError = MobiError::None;
+
   // File offsets of ALL PalmDB records (record 0 is the header record;
   // text records are 1 .. textRecordCount).
   std::vector<uint32_t> recordFileOffsets;
@@ -100,9 +144,15 @@ class Mobi {
   std::vector<uint32_t> virtualOffsets;
   uint32_t virtualTextSize = 0;
 
+  std::vector<MobiChapter> chapters;
+
   // --- Parsing helpers ---
   bool parsePalmDbHeader(FsFile& file);
   bool parseMobiHeaders(FsFile& file);
+  bool detectFormat();
+  bool loadHuffCdic();
+  size_t decompressHuffCdic(const uint8_t* in, size_t inLen, uint8_t* out, size_t outMax) const;
+  bool parseToc();
 
   // --- Virtual offset table ---
   bool buildVirtualOffsetTable();

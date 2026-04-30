@@ -11,7 +11,7 @@ namespace {
 
 // Cache file identifiers
 constexpr uint32_t VOFFSET_MAGIC = 0x4D424F49;  // "MBOI"
-constexpr uint8_t VOFFSET_VERSION = 1;
+constexpr uint8_t VOFFSET_VERSION = 2;
 
 // PalmDB record list entry size (4-byte offset + 4-byte attrs/UID)
 constexpr size_t PALMDB_RECORD_ENTRY_SIZE = 8;
@@ -44,11 +44,18 @@ constexpr size_t REC0_READ_SIZE = 2048;
 // EXTH record types
 constexpr uint32_t EXTH_AUTHOR = 100;
 constexpr uint32_t EXTH_UPDATED_TITLE = 503;
+constexpr uint32_t EXTH_KF8_BOUNDARY = 121;
 
 // Compression types
 constexpr uint16_t COMPRESSION_NONE = 1;
 constexpr uint16_t COMPRESSION_PALMDOC = 2;
 constexpr uint16_t COMPRESSION_HUFFMAN = 17480;
+
+// MOBI type value indicating KF8 format
+constexpr uint32_t MOBI_TYPE_KF8 = 248;
+
+// Offset of MOBI type field within rec0 (MOBI magic at 16, type at +8 = 24)
+constexpr size_t REC0_MOBI_TYPE_OFFSET = 24;
 
 }  // namespace
 
@@ -62,6 +69,59 @@ Mobi::Mobi(std::string path, std::string cacheBasePath)
   cachePath = this->cacheBasePath + "/mobi_" + std::to_string(hash);
 }
 
+Mobi::~Mobi() {
+  for (uint8_t i = 0; i < cdicTable.recordCount; i++) {
+    free(cdicTable.records[i]);
+    cdicTable.records[i] = nullptr;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Static helpers
+// ---------------------------------------------------------------------------
+
+bool Mobi::isDrmLocked(const char* path) {
+  FsFile file;
+  if (!Storage.openFileForRead("MOBI", path, file)) return false;
+
+  // Read PalmDB header (78 bytes) to get record 0 offset
+  uint8_t hdr[PALMDB_HEADER_SIZE];
+  if (file.read(hdr, sizeof(hdr)) != sizeof(hdr)) {
+    file.close();
+    return false;
+  }
+
+  const uint16_t numRecords = readU16BE(hdr + PALMDB_RECORD_COUNT_OFFSET);
+  if (numRecords < 2) {
+    file.close();
+    return false;
+  }
+
+  // Read first record list entry (8 bytes) to get record 0 file offset
+  uint8_t recEntry[PALMDB_RECORD_ENTRY_SIZE];
+  if (file.read(recEntry, sizeof(recEntry)) != sizeof(recEntry)) {
+    file.close();
+    return false;
+  }
+
+  const uint32_t rec0Start = readU32BE(recEntry);
+
+  // Read up to 100 bytes of Record 0
+  uint8_t rec0[100];
+  if (!file.seek(rec0Start)) {
+    file.close();
+    return false;
+  }
+  const size_t readLen = file.read(rec0, sizeof(rec0));
+  file.close();
+
+  if (readLen < 14) return false;  // Need at least offset 12+2 for encryptionType
+
+  // PalmDOC header: encryptionType at offset 12 (uint16 BE)
+  const uint16_t encryptionType = readU16BE(rec0 + 12);
+  return encryptionType == 2;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -69,6 +129,11 @@ Mobi::Mobi(std::string path, std::string cacheBasePath)
 bool Mobi::load() {
   if (loaded) return true;
   if (!loadHeader()) return false;
+  if (!detectFormat()) return false;
+
+  if (mobiVariant == MobiVariant::KF8 || compressionType == COMPRESSION_HUFFMAN) {
+    if (!loadHuffCdic()) return false;
+  }
 
   // Try loading cached virtual offset table first; build if absent.
   if (!loadVirtualOffsetTable()) {
@@ -77,6 +142,10 @@ bool Mobi::load() {
       return false;
     }
     saveVirtualOffsetTable();
+  }
+
+  if (mobiVariant == MobiVariant::KF8) {
+    parseToc();  // Non-fatal: failure means no chapters
   }
 
   loaded = true;
@@ -106,14 +175,23 @@ bool Mobi::loadHeader() {
 
   if (!ok) return false;
 
-  if (compressionType == COMPRESSION_HUFFMAN) {
-    LOG_ERR("MOBI", "Huffman (KF8) compression is not supported");
-    return false;
-  }
-
   headerLoaded = true;
   LOG_DBG("MOBI", "Header loaded: title='%s' author='%s' compression=%u records=%u", title.c_str(),
           author.c_str(), compressionType, textRecordCount);
+  return true;
+}
+
+bool Mobi::detectFormat() {
+  // mobiTypeField and kf8SectionRecord were populated by parseMobiHeaders().
+  // kf8SectionRecord == 0xFFFFFFFF means no EXTH 121 was found.
+
+  if (mobiTypeField == MOBI_TYPE_KF8 || kf8SectionRecord != 0xFFFFFFFF) {
+    mobiVariant = MobiVariant::KF8;
+    LOG_DBG("MOBI", "KF8 format detected: mobiType=%u kf8SectionRecord=%u", mobiTypeField, kf8SectionRecord);
+    return true;
+  }
+
+  mobiVariant = MobiVariant::MOBI7;
   return true;
 }
 
@@ -124,7 +202,10 @@ std::string Mobi::getTitle() const {
   size_t lastSlash = filepath.find_last_of('/');
   std::string filename = (lastSlash != std::string::npos) ? filepath.substr(lastSlash + 1) : filepath;
   if (FsHelpers::hasMobiExtension(filename)) {
-    filename = filename.substr(0, filename.length() - 5);
+    const size_t dotPos = filename.rfind('.');
+    if (dotPos != std::string::npos) {
+      filename = filename.substr(0, dotPos);
+    }
   }
   return filename;
 }
@@ -218,19 +299,20 @@ bool Mobi::readContent(uint8_t* buffer, size_t offset, size_t length) const {
     const size_t rawSize = readRawRecord(file, static_cast<uint16_t>(r), rawBuf, rawBufSize);
     if (rawSize == 0) break;
 
-    size_t strippedLen = 0;
-    if (compressionType == COMPRESSION_PALMDOC) {
-      strippedLen = decompressPalmDoc(rawBuf, rawSize, decompBuf, decompBufSize);
+    size_t decompLen = 0;
+    if (compressionType == COMPRESSION_HUFFMAN) {
+      decompLen = decompressHuffCdic(rawBuf, rawSize, decompBuf, decompBufSize);
+    } else if (compressionType == COMPRESSION_PALMDOC) {
+      decompLen = decompressPalmDoc(rawBuf, rawSize, decompBuf, decompBufSize);
     } else {
-      // Uncompressed: strip HTML directly from raw
       if (rawSize <= decompBufSize) {
         memcpy(decompBuf, rawBuf, rawSize);
-        strippedLen = rawSize;
+        decompLen = rawSize;
       }
     }
 
     // Strip HTML in-place (output is <= input)
-    strippedLen = stripHtml(decompBuf, strippedLen, decompBuf, strippedLen);
+    size_t strippedLen = stripHtml(decompBuf, decompLen, decompBuf, decompLen);
 
     // Sanity-check against the virtual offset table
     if (strippedLen != recVirtualLen) {
@@ -419,6 +501,17 @@ bool Mobi::parseMobiHeaders(FsFile& file) {
 
   if (maxRecordSize == 0) maxRecordSize = 4096;  // Sensible default
 
+  // DRM check: encryptionType at PalmDOC header offset 12 (uint16 BE)
+  if (rec0Size >= 14) {
+    const uint16_t encryptionType = readU16BE(buf + 12);
+    if (encryptionType == 2) {
+      free(buf);
+      lastError = MobiError::DrmProtected;
+      LOG_ERR("MOBI", "DRM-encrypted file — cannot open");
+      return false;
+    }
+  }
+
   // Check for MOBI magic at offset 16
   if (rec0Size < REC0_MOBI_MAGIC_OFFSET + 4 || buf[REC0_MOBI_MAGIC_OFFSET] != 'M' ||
       buf[REC0_MOBI_MAGIC_OFFSET + 1] != 'O' || buf[REC0_MOBI_MAGIC_OFFSET + 2] != 'B' ||
@@ -433,6 +526,11 @@ bool Mobi::parseMobiHeaders(FsFile& file) {
     }
     free(buf);
     return true;
+  }
+
+  // Cache MOBI type field (rec0 offset 24 = MOBI magic offset 16 + type offset 8)
+  if (rec0Size >= REC0_MOBI_TYPE_OFFSET + 4) {
+    mobiTypeField = readU32BE(buf + REC0_MOBI_TYPE_OFFSET);
   }
 
   // MOBI header: header length field at rec0[20]
@@ -494,6 +592,10 @@ bool Mobi::parseMobiHeaders(FsFile& file) {
           } else if (recType == EXTH_UPDATED_TITLE) {
             // Updated title overrides the full-name field
             title = std::string(reinterpret_cast<const char*>(buf + dataStart), dataLen);
+          } else if (recType == EXTH_KF8_BOUNDARY && dataLen == 4) {
+            uint32_t boundary;
+            memcpy(&boundary, buf + dataStart, 4);
+            kf8SectionRecord = __builtin_bswap32(boundary);
           }
         }
 
@@ -503,6 +605,606 @@ bool Mobi::parseMobiHeaders(FsFile& file) {
   }
 
   free(buf);
+
+  // If KF8 markers found, re-parse the KF8 section Record 0 to get KF8-specific header fields.
+  // The KF8 section has its own compressionType (17480), textRecordCount, maxRecordSize,
+  // extraDataFlags — different from the MOBI7 values just parsed.
+  const bool isKf8 = (mobiTypeField == MOBI_TYPE_KF8 || kf8SectionRecord != 0xFFFFFFFF);
+  if (isKf8 && kf8SectionRecord != 0xFFFFFFFF &&
+      kf8SectionRecord < static_cast<uint32_t>(recordFileOffsets.size())) {
+    const uint32_t kf8Rec0Start = recordFileOffsets[kf8SectionRecord];
+    const uint32_t kf8Rec0End =
+        (kf8SectionRecord + 1 < static_cast<uint32_t>(recordFileOffsets.size()))
+            ? recordFileOffsets[kf8SectionRecord + 1]
+            : fileSize;
+    const uint32_t kf8Rec0Size = std::min<uint32_t>(kf8Rec0End - kf8Rec0Start, REC0_READ_SIZE);
+
+    auto* kf8Buf = static_cast<uint8_t*>(malloc(kf8Rec0Size));
+    if (kf8Buf) {
+      if (file.seek(kf8Rec0Start) && file.read(kf8Buf, kf8Rec0Size) == kf8Rec0Size) {
+        // Override with KF8 section header values
+        compressionType = readU16BE(kf8Buf + REC0_COMPRESSION_OFFSET);
+        rawTextLength = readU32BE(kf8Buf + REC0_TEXT_LENGTH_OFFSET);
+        textRecordCount = readU16BE(kf8Buf + REC0_RECORD_COUNT_OFFSET);
+        maxRecordSize = readU16BE(kf8Buf + REC0_RECORD_SIZE_OFFSET);
+        if (maxRecordSize == 0) maxRecordSize = 4096;
+        if (kf8Rec0Size >= REC0_EXTRA_DATA_FLAGS_OFFSET + 2) {
+          extraDataFlags = readU16BE(kf8Buf + REC0_EXTRA_DATA_FLAGS_OFFSET);
+        }
+        kf8FirstTextRecord = kf8SectionRecord + 1;
+        LOG_DBG("MOBI", "KF8 section: compression=%u records=%u firstTextRec=%u",
+                compressionType, textRecordCount, kf8FirstTextRecord);
+      } else {
+        LOG_ERR("MOBI", "Failed to read KF8 section Record 0");
+      }
+      free(kf8Buf);
+    }
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Huffman/CDIC decompressor
+// ---------------------------------------------------------------------------
+
+bool Mobi::loadHuffCdic() {
+  // KF8: reads huffRecordOffset/cdicCount from the type-248 section header (fixed offsets).
+  // MOBI7: scans non-text records for "HUFF" magic (field position varies by file version).
+
+  uint32_t headerRecIdx;
+  if (mobiVariant == MobiVariant::KF8) {
+    if (kf8SectionRecord >= static_cast<uint32_t>(recordFileOffsets.size())) {
+      LOG_ERR("MOBI", "KF8 section record %u out of range", kf8SectionRecord);
+      return false;
+    }
+    headerRecIdx = kf8SectionRecord;
+  } else {
+    headerRecIdx = 0;  // MOBI7: huff fields live in Record 0
+  }
+
+  FsFile file;
+  if (!Storage.openFileForRead("MOBI", filepath, file)) return false;
+
+  const uint32_t hdrRecStart = recordFileOffsets[headerRecIdx];
+  const uint32_t hdrRecEnd =
+      (headerRecIdx + 1 < static_cast<uint32_t>(recordFileOffsets.size()))
+          ? recordFileOffsets[headerRecIdx + 1]
+          : fileSize;
+  const uint32_t hdrRecSize = std::min<uint32_t>(hdrRecEnd - hdrRecStart, REC0_READ_SIZE);
+
+  auto* hdrBuf = static_cast<uint8_t*>(malloc(hdrRecSize));
+  if (!hdrBuf) {
+    file.close();
+    LOG_ERR("MOBI", "malloc failed for huff header");
+    return false;
+  }
+
+  if (!file.seek(hdrRecStart) || file.read(hdrBuf, hdrRecSize) != hdrRecSize) {
+    free(hdrBuf);
+    file.close();
+    LOG_ERR("MOBI", "Failed to read huff header record %u", headerRecIdx);
+    return false;
+  }
+
+  if (hdrRecSize < REC0_MOBI_MAGIC_OFFSET + 4 || hdrBuf[REC0_MOBI_MAGIC_OFFSET] != 'M' ||
+      hdrBuf[REC0_MOBI_MAGIC_OFFSET + 1] != 'O' || hdrBuf[REC0_MOBI_MAGIC_OFFSET + 2] != 'B' ||
+      hdrBuf[REC0_MOBI_MAGIC_OFFSET + 3] != 'I') {
+    free(hdrBuf);
+    file.close();
+    LOG_ERR("MOBI", "Huff header record missing MOBI magic");
+    return false;
+  }
+
+  uint32_t huffRecordOffset = 0;
+  uint32_t cdicCount = 0;
+
+  if (mobiVariant == MobiVariant::KF8) {
+    // KF8: read pointers from the type-248 section header at fixed offsets.
+    constexpr size_t HUFF_REC_OFFSET   = REC0_MOBI_MAGIC_OFFSET + 104;  // 120
+    constexpr size_t HUFF_COUNT_OFFSET = REC0_MOBI_MAGIC_OFFSET + 108;  // 124
+    if (hdrRecSize < HUFF_COUNT_OFFSET + 4) {
+      free(hdrBuf);
+      file.close();
+      LOG_ERR("MOBI", "KF8 header too small for huff fields");
+      return false;
+    }
+    huffRecordOffset = readU32BE(hdrBuf + HUFF_REC_OFFSET);
+    cdicCount        = readU32BE(hdrBuf + HUFF_COUNT_OFFSET);
+    free(hdrBuf);
+    LOG_DBG("MOBI", "KF8 huff record at PalmDB index %u, %u CDIC records", huffRecordOffset, cdicCount);
+  } else {
+    // MOBI7: the huffrec field position varies by file version.
+    // Scan records after the text records for "HUFF" magic, then count "CDIC" records.
+    free(hdrBuf);
+    const uint32_t firstNonText = kf8FirstTextRecord + textRecordCount;
+    bool found = false;
+    for (uint32_t i = firstNonText; i < static_cast<uint32_t>(recordFileOffsets.size()); i++) {
+      const uint32_t rStart = recordFileOffsets[i];
+      uint8_t magic[4] = {};
+      if (!file.seek(rStart) || file.read(magic, 4) != 4) continue;
+      if (magic[0] == 'H' && magic[1] == 'U' && magic[2] == 'F' && magic[3] == 'F') {
+        huffRecordOffset = i;
+        for (uint32_t j = i + 1; j < static_cast<uint32_t>(recordFileOffsets.size()); j++) {
+          uint8_t cm[4] = {};
+          if (!file.seek(recordFileOffsets[j]) || file.read(cm, 4) != 4) break;
+          if (cm[0] == 'C' && cm[1] == 'D' && cm[2] == 'I' && cm[3] == 'C') {
+            cdicCount++;
+          } else {
+            break;
+          }
+        }
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      file.close();
+      LOG_ERR("MOBI", "MOBI7 HUFF record not found in %u non-text records",
+              static_cast<uint32_t>(recordFileOffsets.size()) - firstNonText);
+      return false;
+    }
+    LOG_DBG("MOBI", "MOBI7 huff record at PalmDB index %u, %u CDIC records", huffRecordOffset, cdicCount);
+  }
+
+  // Cap check BEFORE any malloc
+  if (cdicCount > MAX_CDIC_RECORDS) {
+    file.close();
+    lastError = MobiError::CdicCapExceeded;
+    LOG_ERR("MOBI", "CDIC record count %u exceeds cap %u", cdicCount, MAX_CDIC_RECORDS);
+    return false;
+  }
+
+  // Read HUFF record: it's at PalmDB record index huffRecordOffset (absolute record index)
+  if (huffRecordOffset >= static_cast<uint32_t>(recordFileOffsets.size())) {
+    file.close();
+    LOG_ERR("MOBI", "HUFF record index %u out of range", huffRecordOffset);
+    return false;
+  }
+
+  const uint32_t huffStart = recordFileOffsets[huffRecordOffset];
+  const uint32_t huffEnd =
+      (huffRecordOffset + 1 < static_cast<uint32_t>(recordFileOffsets.size()))
+          ? recordFileOffsets[huffRecordOffset + 1]
+          : fileSize;
+
+  // HUFF record minimum size: 4 magic + 4 hdrlen + 4 dict1off + 4 dict2off + 4 d1len + 4 d2len
+  // + 256*4 dict1 + 64*4 dict2 = 24 + 1024 + 256 = 1304 bytes minimum
+  constexpr size_t HUFF_MIN_SIZE = 24 + 256 * 4 + 64 * 4;
+  if (huffEnd <= huffStart || huffEnd - huffStart < HUFF_MIN_SIZE) {
+    file.close();
+    LOG_ERR("MOBI", "HUFF record too small");
+    return false;
+  }
+
+  auto* huffBuf = static_cast<uint8_t*>(malloc(huffEnd - huffStart));
+  if (!huffBuf) {
+    file.close();
+    LOG_ERR("MOBI", "malloc failed for HUFF record");
+    return false;
+  }
+
+  if (!file.seek(huffStart) || file.read(huffBuf, huffEnd - huffStart) != huffEnd - huffStart) {
+    free(huffBuf);
+    file.close();
+    LOG_ERR("MOBI", "Failed to read HUFF record");
+    return false;
+  }
+
+  // Validate HUFF magic
+  if (huffBuf[0] != 'H' || huffBuf[1] != 'U' || huffBuf[2] != 'F' || huffBuf[3] != 'F') {
+    free(huffBuf);
+    file.close();
+    LOG_ERR("MOBI", "HUFF record missing magic");
+    return false;
+  }
+
+  // Parse dict1 and dict2 offsets from HUFF header
+  const uint32_t dict1Off = readU32BE(huffBuf + 8);
+  const uint32_t dict2Off = readU32BE(huffBuf + 12);
+  const uint32_t huffRecLen = static_cast<uint32_t>(huffEnd - huffStart);
+
+  if (dict1Off + 256 * 4 > huffRecLen || dict2Off + 64 * 4 > huffRecLen) {
+    free(huffBuf);
+    file.close();
+    LOG_ERR("MOBI", "HUFF dict offsets out of range");
+    return false;
+  }
+
+  // Load dict1 (256 × uint32 BE) and dict2 (64 × uint32 BE) via readU32BE to avoid alignment faults
+  for (int i = 0; i < 256; i++) {
+    huffTable.dict1[i] = readU32BE(huffBuf + dict1Off + i * 4);
+  }
+  for (int i = 0; i < 64; i++) {
+    huffTable.dict2[i] = readU32BE(huffBuf + dict2Off + i * 4);
+  }
+  free(huffBuf);
+
+  // Load CDIC records (they follow the HUFF record sequentially)
+  for (uint32_t i = 0; i < cdicCount; i++) {
+    const uint32_t cdicPalmIdx = huffRecordOffset + 1 + i;
+    if (cdicPalmIdx >= static_cast<uint32_t>(recordFileOffsets.size())) {
+      LOG_ERR("MOBI", "CDIC record %u index %u out of range", i, cdicPalmIdx);
+      // Free already-allocated blocks
+      for (uint8_t j = 0; j < cdicTable.recordCount; j++) {
+        free(cdicTable.records[j]);
+        cdicTable.records[j] = nullptr;
+      }
+      cdicTable.recordCount = 0;
+      file.close();
+      return false;
+    }
+
+    const uint32_t cdicStart = recordFileOffsets[cdicPalmIdx];
+    const uint32_t cdicEnd =
+        (cdicPalmIdx + 1 < static_cast<uint32_t>(recordFileOffsets.size()))
+            ? recordFileOffsets[cdicPalmIdx + 1]
+            : fileSize;
+    const uint32_t cdicLen = std::min<uint32_t>(cdicEnd - cdicStart, CDIC_RECORD_SIZE);
+
+    cdicTable.records[i] = static_cast<uint8_t*>(malloc(CDIC_RECORD_SIZE));
+    if (!cdicTable.records[i]) {
+      LOG_ERR("MOBI", "malloc failed for CDIC record %u", i);
+      for (uint8_t j = 0; j < cdicTable.recordCount; j++) {
+        free(cdicTable.records[j]);
+        cdicTable.records[j] = nullptr;
+      }
+      cdicTable.recordCount = 0;
+      file.close();
+      return false;
+    }
+    memset(cdicTable.records[i], 0, CDIC_RECORD_SIZE);
+
+    if (!file.seek(cdicStart) || file.read(cdicTable.records[i], cdicLen) != cdicLen) {
+      LOG_ERR("MOBI", "Failed to read CDIC record %u", i);
+      free(cdicTable.records[i]);
+      cdicTable.records[i] = nullptr;
+      for (uint8_t j = 0; j < cdicTable.recordCount; j++) {
+        free(cdicTable.records[j]);
+        cdicTable.records[j] = nullptr;
+      }
+      cdicTable.recordCount = 0;
+      file.close();
+      return false;
+    }
+
+    // Parse phrasesPerRecord from first CDIC record header (offset 8, uint32 BE)
+    if (i == 0) {
+      if (cdicLen >= 12) {
+        cdicTable.phrasesPerRecord = static_cast<uint16_t>(readU32BE(cdicTable.records[0] + 8));
+      }
+    }
+
+    cdicTable.recordCount = static_cast<uint8_t>(i + 1);
+  }
+
+  file.close();
+  huffCdicLoaded = true;
+  LOG_DBG("MOBI", "Loaded HUFF + %u CDIC records, phrasesPerRecord=%u", cdicTable.recordCount,
+          cdicTable.phrasesPerRecord);
+  return true;
+}
+
+size_t Mobi::decompressHuffCdic(const uint8_t* in, size_t inLen, uint8_t* out, size_t outMax) const {
+  if (!huffCdicLoaded || cdicTable.phrasesPerRecord == 0) return 0;
+
+  // Iterative Huffman decode with explicit work stack to avoid recursion.
+  // Each work item is a phrase fragment that itself may need CDIC expansion.
+  struct WorkItem {
+    const uint8_t* data;
+    uint16_t len;
+    bool compressed;
+  };
+  WorkItem stack[32];
+  int stackTop = 0;
+
+  // Push the initial compressed input as a compressed work item
+  if (stackTop >= 32) return 0;
+  stack[stackTop++] = {in, static_cast<uint16_t>(inLen > 0xFFFF ? 0xFFFF : inLen), true};
+
+  size_t outPos = 0;
+
+  while (stackTop > 0 && outPos < outMax) {
+    WorkItem item = stack[--stackTop];
+
+    if (!item.compressed) {
+      // Plain bytes — copy directly to output
+      const size_t toCopy = std::min<size_t>(item.len, outMax - outPos);
+      memcpy(out + outPos, item.data, toCopy);
+      outPos += toCopy;
+      continue;
+    }
+
+    // Huffman decode this compressed fragment
+    const uint8_t* src = item.data;
+    const size_t srcLen = item.len;
+    size_t srcBit = 0;  // Current bit position within src
+
+    while (srcBit < srcLen * 8 && outPos < outMax) {
+      const size_t bOff = srcBit >> 3;
+      if (bOff >= srcLen) break;
+
+      // Extract 8 bits starting at srcBit (handles non-byte-aligned positions).
+      // Using src[bOff] directly is wrong when srcBit % 8 != 0 — it re-reads
+      // already-consumed bits, producing invalid dict1 lookups.
+      const size_t shift = srcBit & 7;
+      const uint8_t firstByte = (shift == 0)
+          ? src[bOff]
+          : static_cast<uint8_t>((src[bOff] << shift) |
+                                  (bOff + 1 < srcLen ? src[bOff + 1] >> (8 - shift) : 0));
+
+      const uint32_t d1 = huffTable.dict1[firstByte];
+
+      // dict1 entry: bits 31-27 = codelen (5 bits), bit 26 = term flag, bits 23-0 = phrase/maxcode
+      uint8_t codeLen = static_cast<uint8_t>((d1 >> 27) & 0x1F);
+      const bool term = (d1 >> 26) & 1;
+
+      if (codeLen == 0) break;
+
+      uint32_t phraseIdx = 0;
+      if (term) {
+        phraseIdx = d1 & 0x00FFFFFF;
+      } else {
+        // Non-terminal: build 32-bit code from srcBit and search dict2 for actual
+        // code length. Must use 32 bits (not codeLen bits) — dict1 codeLen for
+        // non-terminal entries is only a hint, not the exact length.
+        uint32_t code = 0;
+        for (uint8_t b = 0; b < 32; b++) {
+          const size_t bitPos = srcBit + b;
+          const size_t bp = bitPos >> 3;
+          if (bp < srcLen) {
+            code |= static_cast<uint32_t>((src[bp] >> (7 - (bitPos & 7))) & 1) << (31 - b);
+          }
+        }
+
+        for (uint8_t cl = 1; cl <= 32; cl++) {
+          if ((cl - 1) * 2 + 1 >= 64) break;
+          const uint32_t minC = huffTable.dict2[(cl - 1) * 2];
+          const uint32_t maxC = huffTable.dict2[(cl - 1) * 2 + 1];
+          if (code >= minC && code <= maxC) {
+            codeLen = cl;
+            phraseIdx = (maxC >> (32 - cl)) - (code >> (32 - cl));
+            break;
+          }
+        }
+      }
+
+      srcBit += codeLen;
+
+      // Look up phrase in CDIC
+      const uint16_t ppr = cdicTable.phrasesPerRecord;
+      if (ppr == 0) break;
+      const uint32_t recIdx = phraseIdx / ppr;
+      const uint32_t posInRec = phraseIdx % ppr;
+
+      if (recIdx >= cdicTable.recordCount) {
+        LOG_ERR("MOBI", "CDIC record index %u out of range", recIdx);
+        break;
+      }
+
+      const uint8_t* cdicRec = cdicTable.records[recIdx];
+
+      // CDIC offset table: starts at header end (offset 16 in CDIC record)
+      // Each entry is a uint16 BE offset from the start of phrase data
+      // codeLength field is at CDIC header offset 12 (uint32 BE)
+      const uint32_t codeLength = readU32BE(cdicRec + 12);
+
+      // Bounds check — CVE GHSA-5mwx-65x7-cffp: must check 2×(1<<codeLength) entries
+      const uint32_t maxEntries = 1u << codeLength;
+      if (posInRec >= maxEntries) {
+        LOG_ERR("MOBI", "CDIC bounds check failed: pos %u >= maxEntries %u", posInRec, maxEntries);
+        break;
+      }
+
+      // CDIC header is 16 bytes; offset table follows immediately
+      constexpr uint32_t CDIC_HDR_SIZE = 16;
+      const uint32_t offsetTableEntry = CDIC_HDR_SIZE + posInRec * 2;
+      if (offsetTableEntry + 2 > CDIC_RECORD_SIZE) break;
+
+      uint16_t phraseOffset;
+      memcpy(&phraseOffset, cdicRec + offsetTableEntry, 2);
+      // Big-endian
+      phraseOffset = static_cast<uint16_t>((phraseOffset >> 8) | (phraseOffset << 8));
+
+      const bool phraseCompressed = (phraseOffset & 0x8000) == 0;
+      phraseOffset &= 0x7FFF;
+
+      // Phrase length: difference between this entry's offset and next
+      uint16_t nextOffset;
+      if (posInRec + 1 < maxEntries && offsetTableEntry + 4 <= CDIC_RECORD_SIZE) {
+        memcpy(&nextOffset, cdicRec + offsetTableEntry + 2, 2);
+        nextOffset = static_cast<uint16_t>((nextOffset >> 8) | (nextOffset << 8));
+        nextOffset &= 0x7FFF;
+      } else {
+        // Last phrase — extends to end of record (use a safe upper bound)
+        nextOffset = static_cast<uint16_t>(CDIC_RECORD_SIZE - CDIC_HDR_SIZE);
+      }
+
+      const uint32_t phraseDataStart = CDIC_HDR_SIZE + maxEntries * 2 + phraseOffset;
+      const uint32_t phraseDataEnd = CDIC_HDR_SIZE + maxEntries * 2 + nextOffset;
+
+      if (phraseDataStart >= CDIC_RECORD_SIZE || phraseDataEnd > CDIC_RECORD_SIZE ||
+          phraseDataEnd <= phraseDataStart) {
+        break;
+      }
+
+      const uint16_t phraseLen = static_cast<uint16_t>(phraseDataEnd - phraseDataStart);
+
+      if (phraseCompressed) {
+        // Push for recursive expansion — but only if stack has room
+        if (stackTop < 32) {
+          stack[stackTop++] = {cdicRec + phraseDataStart, phraseLen, true};
+        }
+      } else {
+        const size_t toCopy = std::min<size_t>(phraseLen, outMax - outPos);
+        memcpy(out + outPos, cdicRec + phraseDataStart, toCopy);
+        outPos += toCopy;
+      }
+    }
+  }
+
+  return outPos;
+}
+
+// ---------------------------------------------------------------------------
+// TOC / chapter navigation (KF8 NCX INDX)
+// ---------------------------------------------------------------------------
+
+bool Mobi::parseToc() {
+  chapters.clear();
+
+  // NCX record index is at KF8 MOBI header offset 160 (relative to MOBI magic in KF8 rec0).
+  // Absolute rec0 offset = 16 (MOBI magic offset) + 160 = 176.
+  constexpr size_t KF8_NCX_INDEX_OFFSET = 176;
+
+  if (kf8SectionRecord >= static_cast<uint32_t>(recordFileOffsets.size())) {
+    return true;  // No KF8 section
+  }
+
+  // Read enough of the KF8 rec0 to get the NCX field
+  const uint32_t kf8Rec0Start = recordFileOffsets[kf8SectionRecord];
+  const uint32_t kf8Rec0Needed = kf8Rec0Start + KF8_NCX_INDEX_OFFSET + 4;
+  if (kf8Rec0Needed > fileSize) return true;
+
+  FsFile file;
+  if (!Storage.openFileForRead("MOBI", filepath, file)) return true;
+
+  constexpr size_t HDR_BUF_SIZE = KF8_NCX_INDEX_OFFSET + 4;
+  uint8_t hdrBuf[HDR_BUF_SIZE];
+  if (!file.seek(kf8Rec0Start) || file.read(hdrBuf, HDR_BUF_SIZE) != HDR_BUF_SIZE) {
+    file.close();
+    return true;
+  }
+
+  const uint32_t ncxRelIdx = readU32BE(hdrBuf + KF8_NCX_INDEX_OFFSET);
+  if (ncxRelIdx == 0xFFFFFFFF) {
+    file.close();
+    return true;  // No NCX
+  }
+
+  // The NCX record index is relative to KF8 Record 0's position in the PalmDB record list
+  const uint32_t ncxPalmIdx = kf8SectionRecord + ncxRelIdx;
+  if (ncxPalmIdx >= static_cast<uint32_t>(recordFileOffsets.size())) {
+    file.close();
+    return true;
+  }
+
+  const uint32_t indxStart = recordFileOffsets[ncxPalmIdx];
+  const uint32_t indxEnd =
+      (ncxPalmIdx + 1 < static_cast<uint32_t>(recordFileOffsets.size()))
+          ? recordFileOffsets[ncxPalmIdx + 1]
+          : fileSize;
+  const uint32_t indxLen = indxEnd - indxStart;
+
+  if (indxLen < 48) {
+    file.close();
+    return true;
+  }
+
+  auto* indxBuf = static_cast<uint8_t*>(malloc(indxLen));
+  if (!indxBuf) {
+    file.close();
+    LOG_ERR("MOBI", "malloc failed for INDX record (%u bytes)", indxLen);
+    return true;
+  }
+
+  if (!file.seek(indxStart) || file.read(indxBuf, indxLen) != indxLen) {
+    free(indxBuf);
+    file.close();
+    LOG_ERR("MOBI", "Failed to read INDX record");
+    return true;
+  }
+  file.close();
+
+  // Validate INDX magic
+  if (indxBuf[0] != 'I' || indxBuf[1] != 'N' || indxBuf[2] != 'D' || indxBuf[3] != 'X') {
+    free(indxBuf);
+    LOG_ERR("MOBI", "INDX record missing magic");
+    return true;
+  }
+
+  // INDX header: offset of index entries section at byte 40 (uint32 BE)
+  const uint32_t hdrLen = readU32BE(indxBuf + 4);
+  const uint32_t entryCount = readU32BE(indxBuf + 24);
+  const uint32_t entrySectionOffset = readU32BE(indxBuf + 40);
+
+  if (entrySectionOffset >= indxLen || hdrLen >= indxLen) {
+    free(indxBuf);
+    return true;
+  }
+
+  chapters.reserve(entryCount > 512 ? 512 : entryCount);
+
+  uint32_t pos = entrySectionOffset;
+  uint32_t parsed = 0;
+
+  while (pos < indxLen && parsed < entryCount && parsed < 512) {
+    if (pos >= indxLen) break;
+
+    // Label: 1-byte length prefix + UTF-8 bytes
+    const uint8_t labelLen = indxBuf[pos++];
+    if (pos + labelLen > indxLen) break;
+
+    std::string label(reinterpret_cast<const char*>(indxBuf + pos), labelLen);
+    pos += labelLen;
+
+    if (pos >= indxLen) break;
+
+    // Control byte: number of tags
+    const uint8_t numControlBytes = indxBuf[pos++];
+
+    // Skip control bytes to find tag data
+    // For MVP: scan for tag ID 1 (text offset) in the tag data
+    // Tags are variable-length VLQ-encoded values. We do a simplified parse:
+    // skip numControlBytes bytes of bitmask, then read VLQ values.
+    if (pos + numControlBytes > indxLen) break;
+
+    // Read control bitmask bytes
+    uint8_t controlBytes[8] = {};
+    const uint8_t ctrlLen = numControlBytes < 8 ? numControlBytes : 8;
+    memcpy(controlBytes, indxBuf + pos, ctrlLen);
+    pos += numControlBytes;
+
+    // Tag table in this INDX record starts at hdrLen; simplified: just scan VLQ values
+    // For each bit set in controlBytes, there's a VLQ value in the tag data stream.
+    // Tag ID 1 is the file offset tag — it's always the first tag value.
+    uint32_t virtualOffset = 0;
+    bool gotOffset = false;
+
+    // Decode first VLQ value (tag ID 1 = text offset)
+    // VLQ: each byte contributes 7 bits; high bit set = more bytes follow
+    uint32_t vlqVal = 0;
+    for (int vb = 0; vb < 4 && pos < indxLen; vb++) {
+      const uint8_t b = indxBuf[pos++];
+      vlqVal = (vlqVal << 7) | (b & 0x7F);
+      if (!(b & 0x80)) {
+        virtualOffset = vlqVal;
+        gotOffset = true;
+        break;
+      }
+    }
+
+    if (gotOffset) {
+      chapters.push_back({label, virtualOffset});
+      parsed++;
+    }
+
+    // Skip remaining tag data for this entry (advance to next entry)
+    // We skip remaining set bits in controlBytes
+    for (uint8_t cb = 0; cb < ctrlLen && pos < indxLen; cb++) {
+      for (int bit = 6; bit >= 0; bit--) {
+        if (controlBytes[cb] & (1 << bit)) {
+          // Skip one VLQ value
+          for (int vb = 0; vb < 4 && pos < indxLen; vb++) {
+            if (!(indxBuf[pos++] & 0x80)) break;
+          }
+        }
+      }
+    }
+  }
+
+  free(indxBuf);
+  LOG_DBG("MOBI", "Parsed %zu chapters from INDX", chapters.size());
   return true;
 }
 
@@ -549,14 +1251,19 @@ bool Mobi::buildVirtualOffsetTable() {
     size_t strippedLen = 0;
 
     if (rawSize > 0) {
-      if (compressionType == COMPRESSION_PALMDOC) {
-        const size_t decompLen = decompressPalmDoc(rawBuf, rawSize, decompBuf, decompBufSize);
-        strippedLen = stripHtml(decompBuf, decompLen, decompBuf, decompLen);
+      size_t decompLen = 0;
+      if (compressionType == COMPRESSION_HUFFMAN) {
+        decompLen = decompressHuffCdic(rawBuf, rawSize, decompBuf, decompBufSize);
+        if (decompLen == 0) {
+          LOG_ERR("MOBI", "HuffCdic decompression failed on record %u", r);
+        }
+      } else if (compressionType == COMPRESSION_PALMDOC) {
+        decompLen = decompressPalmDoc(rawBuf, rawSize, decompBuf, decompBufSize);
       } else {
-        // Uncompressed — strip HTML in-place
         memcpy(decompBuf, rawBuf, rawSize);
-        strippedLen = stripHtml(decompBuf, rawSize, decompBuf, rawSize);
+        decompLen = rawSize;
       }
+      strippedLen = stripHtml(decompBuf, decompLen, decompBuf, decompLen);
     }
 
     virtualOffsets.push_back(virtualOffsets.back() + static_cast<uint32_t>(strippedLen));
@@ -655,16 +1362,16 @@ bool Mobi::saveVirtualOffsetTable() const {
 // ---------------------------------------------------------------------------
 
 size_t Mobi::readRawRecord(FsFile& file, uint16_t recIdx, uint8_t* buf, size_t bufSize) const {
-  // Text records are at PalmDB record indices 1 .. textRecordCount (0-based in recordFileOffsets)
-  const uint16_t palmRecIdx = recIdx + 1;
+  // Text records start at kf8FirstTextRecord (1 for MOBI7, kf8SectionRecord+1 for KF8)
+  const uint32_t palmRecIdx = kf8FirstTextRecord + recIdx;
 
-  if (palmRecIdx >= static_cast<uint16_t>(recordFileOffsets.size())) {
+  if (palmRecIdx >= static_cast<uint32_t>(recordFileOffsets.size())) {
     LOG_ERR("MOBI", "Record index %u out of range", palmRecIdx);
     return 0;
   }
 
   const uint32_t recStart = recordFileOffsets[palmRecIdx];
-  const uint32_t recEnd = (palmRecIdx + 1 < static_cast<uint16_t>(recordFileOffsets.size()))
+  const uint32_t recEnd = (palmRecIdx + 1 < static_cast<uint32_t>(recordFileOffsets.size()))
                               ? recordFileOffsets[palmRecIdx + 1]
                               : fileSize;
 

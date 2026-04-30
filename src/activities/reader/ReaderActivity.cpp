@@ -2,6 +2,7 @@
 
 #include <FsHelpers.h>
 #include <HalStorage.h>
+#include <I18n.h>
 
 #include "CrossPointSettings.h"
 #include "Epub.h"
@@ -45,7 +46,20 @@ std::unique_ptr<Mobi> ReaderActivity::loadMobi(const std::string& path) {
     return mobi;
   }
 
-  LOG_ERR("READER", "Failed to load MOBI");
+  // Map error code to user-visible message
+  const char* msg = nullptr;
+  switch (mobi->getLastError()) {
+    case Mobi::MobiError::DrmProtected:
+      msg = tr(STR_DRM_PROTECTED);
+      break;
+    case Mobi::MobiError::CdicCapExceeded:
+      msg = tr(STR_CDIC_CAP_EXCEEDED);
+      break;
+    default:
+      LOG_ERR("READER", "Failed to load MOBI");
+      return nullptr;
+  }
+  activityManager.pushActivity(std::make_unique<FullScreenMessageActivity>(renderer, mappedInput, msg));
   return nullptr;
 }
 
