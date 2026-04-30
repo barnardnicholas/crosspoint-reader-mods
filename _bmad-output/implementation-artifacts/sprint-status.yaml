@@ -1,0 +1,25 @@
+# Sprint Status — crosspoint-reader-mods
+# AZW/AZW3 Support (FEAT-azw-azw-3-support branch)
+# Generated: 2026-04-27
+
+# STATUS DEFINITIONS
+# backlog:       Story exists, not yet converted to a story file
+# ready-for-dev: Story file created, ready for implementation
+# in-progress:   Dev agent is working on this story
+# done:          Story implemented and verified
+
+last_updated: "2026-04-27"
+
+development_status:
+  # Epic 1: AZW/AZW3 Support
+  epic-1: in-progress
+
+  1-1-cache-version-bump: review
+  1-2-extension-recognition: review
+  1-3-drm-file-browser: review
+  1-4-i18n-keys: review
+  1-5-format-dispatch: review
+  1-6-huffman-cdic: review
+  1-7-kf8-text-decoding: review
+  1-8-chapter-navigation: ready-for-dev
+  1-9-cache-v2-serialization: ready-for-dev
